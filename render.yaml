@@ -17,6 +17,6 @@ services:
 
 databases:
   - name: movra-db
-    plan: starter
+    plan: basic-256mb
     databaseName: movra
     user: movra
