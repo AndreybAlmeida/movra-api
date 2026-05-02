@@ -6,8 +6,9 @@ const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 
 const app  = express();
+const dbUrl = (process.env.DATABASE_URL || '').replace('channel_binding=require', 'sslmode=require').replace('&&', '&').replace('?&', '?');
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: dbUrl,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
