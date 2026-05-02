@@ -106,13 +106,13 @@ app.get('/cargas', auth, async (req, res) => {
 
 // POST /cargas  — publicar nova carga
 app.post('/cargas', auth, async (req, res) => {
-  const { origen, destino, tipo, peso = '', valor_gs = 0, fecha_salida } = req.body;
+  const { origen, destino, tipo, peso = '', valor_gs = 0, fecha_salida, tipo_camion = '', especializacion = '', carga_peligrosa = false } = req.body;
   if (!origen || !destino || !tipo) return res.status(400).json({ error: 'origen, destino e tipo são obrigatórios' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO cargas (empresa_id, empresa_nombre, origen, destino, tipo, peso, valor_gs, fecha_salida)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.empresa.id, req.empresa.nombre, origen, destino, tipo, peso, valor_gs, fecha_salida || null]
+      `INSERT INTO cargas (empresa_id, empresa_nombre, origen, destino, tipo, peso, valor_gs, fecha_salida, tipo_camion, especializacion, carga_peligrosa)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [req.empresa.id, req.empresa.nombre, origen, destino, tipo, peso, valor_gs, fecha_salida || null, tipo_camion, especializacion, carga_peligrosa]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -121,7 +121,29 @@ app.post('/cargas', auth, async (req, res) => {
   }
 });
 
-// PATCH /cargas/:id/status
+// PATCH /cargas/:id  — editar carga completa
+app.patch('/cargas/:id', auth, async (req, res) => {
+  const { origen, destino, tipo, peso, valor_gs, fecha_salida, tipo_camion, especializacion, carga_peligrosa, status } = req.body;
+  const VALID_STATUS = ['pendiente', 'asignada', 'en_transito', 'entregada', 'urgente'];
+  if (status && !VALID_STATUS.includes(status)) return res.status(400).json({ error: 'Status inválido' });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE cargas SET
+        origen=$1, destino=$2, tipo=$3, peso=$4, valor_gs=$5, fecha_salida=$6,
+        tipo_camion=$7, especializacion=$8, carga_peligrosa=$9,
+        status=COALESCE($10, status)
+       WHERE id=$11 AND empresa_id=$12 RETURNING *`,
+      [origen, destino, tipo, peso, valor_gs, fecha_salida || null, tipo_camion || '', especializacion || '', carga_peligrosa || false, status || null, req.params.id, req.empresa.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Carga não encontrada' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao atualizar carga' });
+  }
+});
+
+// PATCH /cargas/:id/status  — atualizar só o status
 app.patch('/cargas/:id/status', auth, async (req, res) => {
   const { status } = req.body;
   const VALID = ['pendiente', 'asignada', 'en_transito', 'entregada', 'urgente'];
