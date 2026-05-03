@@ -106,13 +106,39 @@ app.get('/cargas', auth, async (req, res) => {
 
 // POST /cargas  — publicar nova carga
 app.post('/cargas', auth, async (req, res) => {
-  const { origen, destino, tipo, peso = '', valor_gs = 0, fecha_salida, tipo_camion = '', especializacion = '', carga_peligrosa = false } = req.body;
-  if (!origen || !destino || !tipo) return res.status(400).json({ error: 'origen, destino e tipo são obrigatórios' });
+  const {
+    origen, destino,
+    tipo = '', tipo_produto = '', modalidade = '', peso = '',
+    valor_gs = 0, valor_carga = 0, moneda = 'PYG',
+    fecha_salida, fecha_retiro, fecha_entrega,
+    tipo_camion = '', tipo_carroceria = '', especializacion = '',
+    carga_peligrosa = false, observaciones = '',
+    distancia_km = 0, tiempo_min = 0, pedagios = 0, costo_pedagio_pyg = 0,
+  } = req.body;
+  if (!origen || !destino) return res.status(400).json({ error: 'origen y destino son obligatorios' });
+  if (origen === destino) return res.status(400).json({ error: 'origen y destino deben ser diferentes' });
+  const valorFinal = Number(valor_carga) || Number(valor_gs) || 0;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO cargas (empresa_id, empresa_nombre, origen, destino, tipo, peso, valor_gs, fecha_salida, tipo_camion, especializacion, carga_peligrosa)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [req.empresa.id, req.empresa.nombre, origen, destino, tipo, peso, valor_gs, fecha_salida || null, tipo_camion, especializacion, carga_peligrosa]
+      `INSERT INTO cargas (
+        empresa_id, empresa_nombre, origen, destino,
+        tipo, tipo_produto, modalidade, peso,
+        valor_gs, valor_carga, moneda,
+        fecha_salida, fecha_retiro, fecha_entrega,
+        tipo_camion, tipo_carroceria, especializacion,
+        carga_peligrosa, observaciones,
+        distancia_km, tiempo_min, pedagios, costo_pedagio_pyg
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+      RETURNING *`,
+      [
+        req.empresa.id, req.empresa.nombre, origen, destino,
+        tipo, tipo_produto, modalidade, peso,
+        valorFinal, valorFinal, moneda,
+        fecha_salida || null, fecha_retiro || null, fecha_entrega || null,
+        tipo_camion, tipo_carroceria, especializacion,
+        !!carga_peligrosa, observaciones,
+        Number(distancia_km), Number(tiempo_min), Number(pedagios), Number(costo_pedagio_pyg),
+      ]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -123,17 +149,39 @@ app.post('/cargas', auth, async (req, res) => {
 
 // PATCH /cargas/:id  — editar carga completa
 app.patch('/cargas/:id', auth, async (req, res) => {
-  const { origen, destino, tipo, peso, valor_gs, fecha_salida, tipo_camion, especializacion, carga_peligrosa, status } = req.body;
-  const VALID_STATUS = ['pendiente', 'asignada', 'en_transito', 'entregada', 'urgente'];
+  const {
+    origen, destino,
+    tipo = '', tipo_produto = '', modalidade = '', peso = '',
+    valor_gs, valor_carga, moneda = 'PYG',
+    fecha_salida, fecha_retiro, fecha_entrega,
+    tipo_camion = '', tipo_carroceria = '', especializacion = '',
+    carga_peligrosa = false, observaciones = '',
+    distancia_km = 0, tiempo_min = 0, pedagios = 0, costo_pedagio_pyg = 0,
+    status,
+  } = req.body;
+  const VALID_STATUS = ['pendiente','publicada','visualizada','desbloqueada','aceptada','asignada','agendada','en_transito','entregada','urgente','cancelada'];
   if (status && !VALID_STATUS.includes(status)) return res.status(400).json({ error: 'Status inválido' });
+  const valorFinal = Number(valor_carga) || Number(valor_gs) || 0;
   try {
     const { rows } = await pool.query(
       `UPDATE cargas SET
-        origen=$1, destino=$2, tipo=$3, peso=$4, valor_gs=$5, fecha_salida=$6,
-        tipo_camion=$7, especializacion=$8, carga_peligrosa=$9,
-        status=COALESCE($10, status)
-       WHERE id=$11 AND empresa_id=$12 RETURNING *`,
-      [origen, destino, tipo, peso, valor_gs, fecha_salida || null, tipo_camion || '', especializacion || '', carga_peligrosa || false, status || null, req.params.id, req.empresa.id]
+        origen=$1, destino=$2, tipo=$3, tipo_produto=$4, modalidade=$5, peso=$6,
+        valor_gs=$7, valor_carga=$7, moneda=$8,
+        fecha_salida=$9, fecha_retiro=$10, fecha_entrega=$11,
+        tipo_camion=$12, tipo_carroceria=$13, especializacion=$14,
+        carga_peligrosa=$15, observaciones=$16,
+        distancia_km=$17, tiempo_min=$18, pedagios=$19, costo_pedagio_pyg=$20,
+        status=COALESCE($21, status)
+       WHERE id=$22 AND empresa_id=$23 RETURNING *`,
+      [
+        origen, destino, tipo, tipo_produto, modalidade, peso,
+        valorFinal, moneda,
+        fecha_salida || null, fecha_retiro || null, fecha_entrega || null,
+        tipo_camion, tipo_carroceria, especializacion,
+        !!carga_peligrosa, observaciones,
+        Number(distancia_km), Number(tiempo_min), Number(pedagios), Number(costo_pedagio_pyg),
+        status || null, req.params.id, req.empresa.id,
+      ]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Carga não encontrada' });
     res.json(rows[0]);
@@ -146,7 +194,7 @@ app.patch('/cargas/:id', auth, async (req, res) => {
 // PATCH /cargas/:id/status  — atualizar só o status
 app.patch('/cargas/:id/status', auth, async (req, res) => {
   const { status } = req.body;
-  const VALID = ['pendiente', 'asignada', 'en_transito', 'entregada', 'urgente'];
+  const VALID = ['pendiente','publicada','visualizada','desbloqueada','aceptada','asignada','agendada','en_transito','entregada','urgente','cancelada'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Status inválido' });
   try {
     const { rows } = await pool.query(
