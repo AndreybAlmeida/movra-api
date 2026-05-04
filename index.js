@@ -142,8 +142,8 @@ app.post('/cargas', auth, async (req, res) => {
     );
     res.status(201).json(rows[0]);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro ao criar carga' });
+    console.error('[POST /cargas]', err);
+    res.status(500).json({ error: err.message || 'Erro ao criar carga' });
   }
 });
 
