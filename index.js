@@ -192,7 +192,7 @@ app.patch('/cargas/:id', auth, async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Erro ao atualizar carga' });
+    res.status(500).json({ error: err.message || 'Erro ao atualizar carga' });
   }
 });
 
