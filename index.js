@@ -171,16 +171,16 @@ app.patch('/cargas/:id', auth, async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE cargas SET
         origen=$1, destino=$2, tipo=$3, tipo_produto=$4, modalidade=$5, peso=$6,
-        valor_gs=$7, valor_carga=$7, moneda=$8,
-        fecha_salida=$9, fecha_retiro=$10, fecha_entrega=$11,
-        tipo_camion=$12, tipo_carroceria=$13, especializacion=$14,
-        carga_peligrosa=$15, observaciones=$16,
-        distancia_km=$17, tiempo_min=$18, pedagios=$19, costo_pedagio_pyg=$20,
-        status=COALESCE($21, status)
-       WHERE id=$22 AND empresa_id=$23 RETURNING *`,
+        valor_gs=$7, valor_carga=$8, moneda=$9,
+        fecha_salida=$10, fecha_retiro=$11, fecha_entrega=$12,
+        tipo_camion=$13, tipo_carroceria=$14, especializacion=$15,
+        carga_peligrosa=$16, observaciones=$17,
+        distancia_km=$18, tiempo_min=$19, pedagios=$20, costo_pedagio_pyg=$21,
+        status=COALESCE($22, status)
+       WHERE id=$23 AND empresa_id=$24 RETURNING *`,
       [
         origen, destino, tipo, tipo_produto, modalidade, peso,
-        valorFinal, moneda,
+        valorFinal, valorFinal, moneda,
         fecha_salida || null, fecha_retiro || null, fecha_entrega || null,
         tipo_camion, tipo_carroceria, especializacion,
         !!carga_peligrosa, observaciones,
