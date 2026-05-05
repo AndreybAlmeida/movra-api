@@ -46,16 +46,6 @@ const auth = (req, res, next) => {
 /* ── Health check ──────────────────────────────────── */
 app.get('/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
-/* ── DB debug (temp) ───────────────────────────────── */
-app.get('/debug/db', async (_req, res) => {
-  const masked = dbUrl.replace(/:([^:@]+)@/, ':***@');
-  try {
-    await pool.query('SELECT 1');
-    res.json({ ok: true, url: masked });
-  } catch (err) {
-    res.json({ ok: false, url: masked, error: err.message });
-  }
-});
 
 /* ════════════════════════════════════════════════════
    AUTH
