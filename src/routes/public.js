@@ -25,6 +25,9 @@ const CAMPOS_DESBLOQUEADOS = [
   'c.observaciones',
   'c.modalidade',
   'c.especializacion',
+  'e.telefono   AS empresa_telefono',
+  'e.direccion  AS empresa_direccion',
+  'e.contacto   AS empresa_responsable',
 ];
 
 // GET /public/cargas — lista pública mascarada para Choferes
@@ -92,6 +95,7 @@ router.get('/cargas/desbloqueadas', auth, requireChofer, async (req, res) => {
               d.desbloqueado_at
        FROM cargas c
        JOIN desbloqueios d ON d.carga_id = c.id AND d.chofer_id = $1
+       LEFT JOIN empresas e ON e.id = c.empresa_id
        ORDER BY d.desbloqueado_at DESC`,
       [req.user.id]
     );
@@ -122,7 +126,7 @@ router.get('/cargas/:id', authOptional, async (req, res) => {
       if (debRes.rows[0]) {
         // Retornar dados completos
         const fullRes = await pool.query(
-          `SELECT ${CAMPOS_DESBLOQUEADOS.join(', ')} FROM cargas c WHERE c.id=$1`,
+          `SELECT ${CAMPOS_DESBLOQUEADOS.join(', ')} FROM cargas c LEFT JOIN empresas e ON e.id = c.empresa_id WHERE c.id=$1`,
           [req.params.id]
         );
         return res.json({ ...fullRes.rows[0], desbloqueada: true });
@@ -202,7 +206,7 @@ router.post('/cargas/:id/desbloquear', auth, requireChofer, async (req, res) => 
 
     // Retornar dados completos da carga
     const fullRes = await client.query(
-      `SELECT ${CAMPOS_DESBLOQUEADOS.join(', ')} FROM cargas c WHERE c.id=$1`,
+      `SELECT ${CAMPOS_DESBLOQUEADOS.join(', ')} FROM cargas c LEFT JOIN empresas e ON e.id = c.empresa_id WHERE c.id=$1`,
       [req.params.id]
     );
 
