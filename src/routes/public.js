@@ -231,6 +231,80 @@ router.post('/cargas/:id/desbloquear', auth, requireChofer, async (req, res) => 
   }
 });
 
+// POST /public/cargas/:id/aceptar — aceitar diretamente (requer desbloqueio prévio, atômico)
+router.post('/cargas/:id/aceptar', auth, requireChofer, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock atômico — evita duplo aceite
+    const cargaRes = await client.query(
+      `SELECT id, status, empresa_id, origen, destino, valor_carga, fecha_retiro, fecha_entrega
+       FROM cargas WHERE id=$1 FOR UPDATE`,
+      [req.params.id]
+    );
+    if (!cargaRes.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Carga no encontrada' });
+    }
+    const carga = cargaRes.rows[0];
+    if (!['disponible', 'publicado', 'desbloqueado'].includes(carga.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Esta carga ya fue aceptada por otro chofer.' });
+    }
+
+    // Verificar que o chofer desbloqueou
+    const debRes = await client.query(
+      'SELECT id FROM desbloqueios WHERE carga_id=$1 AND chofer_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!debRes.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Debes desbloquear la carga antes de aceptar.' });
+    }
+
+    // Dados do chofer para registrar no aceite
+    const choferRes = await client.query(
+      `SELECT nombre, telefono, ci, placa, tipo_camion, tipo_carroceria
+       FROM choferes WHERE id=$1`,
+      [req.user.id]
+    );
+    const chofer = choferRes.rows[0] || {};
+
+    // Aceitar a carga atomicamente
+    const { rows } = await client.query(
+      `UPDATE cargas SET
+         status            = 'aceptado',
+         chofer_solicitante_id = $1,
+         chofer_aceptado_at    = NOW()
+       WHERE id=$2
+       RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+
+    // Rejeitar outras solicitudes pendentes da mesma carga (se houver)
+    await client.query(
+      `UPDATE solicitudes SET status='rechazado', respondido_at=NOW()
+       WHERE carga_id=$1 AND status='pendiente'`,
+      [req.params.id]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      carga:   rows[0],
+      chofer,
+      mensaje: '¡Carga aceptada con éxito! Recordá cumplir con la fecha y hora de retiro.',
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[POST /public/cargas/:id/aceptar]', err);
+    res.status(500).json({ error: 'Error al aceptar la carga' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /public/cargas/:id/solicitar — solicitar carga (requer desbloqueio prévio)
 router.post('/cargas/:id/solicitar', auth, requireChofer, async (req, res) => {
   const { notas = '' } = req.body;

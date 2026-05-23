@@ -12,9 +12,16 @@ router.get('/', auth, requireEmpresa, async (req, res) => {
   try {
     let query = `
       SELECT c.*,
-             er.nombre AS empresa_rep_nombre
+             er.nombre  AS empresa_rep_nombre,
+             ch.nombre  AS chofer_nombre,
+             ch.telefono AS chofer_telefono,
+             ch.ci      AS chofer_ci,
+             ch.placa   AS chofer_placa,
+             ch.tipo_camion     AS chofer_tipo_camion,
+             ch.tipo_carroceria AS chofer_tipo_carroceria
       FROM cargas c
       LEFT JOIN empresas_representadas er ON er.id = c.empresa_representada_id
+      LEFT JOIN choferes ch ON ch.id = c.chofer_solicitante_id
       WHERE c.empresa_id = $1
     `;
     const params = [req.user.id];
