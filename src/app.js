@@ -13,6 +13,7 @@ const agenciadorRoutes  = require('./routes/agenciador');
 const cambioRoutes      = require('./routes/cambio');
 const pagosRoutes       = require('./routes/pagos');
 const adminRoutes       = require('./routes/admin');
+const catalogRoutes     = require('./routes/catalog');
 
 // Rota legada de transportistas
 const pool = require('./config/database');
@@ -42,6 +43,7 @@ app.use('/agenciador', agenciadorRoutes);
 app.use('/cambio',     cambioRoutes);
 app.use('/pagos',      pagosRoutes);
 app.use('/admin',      adminRoutes);
+app.use('/catalog-options', catalogRoutes);
 
 /* ── Rota legada: /transportistas ─────────────── */
 app.get('/transportistas', async (req, res) => {
