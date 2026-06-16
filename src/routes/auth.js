@@ -64,8 +64,8 @@ router.post('/register/chofer', async (req, res) => {
   try {
     const senha_hash = await bcrypt.hash(senha, 10);
     const { rows } = await pool.query(
-      `INSERT INTO choferes (nombre, email, senha_hash, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO choferes (nombre, email, senha_hash, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad, creditos, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,3,'pendiente')
        RETURNING id, nombre, email, telefono, ci, placa, tipo_camion, tipo_carroceria, creditos, status, created_at`,
       [nombre, email, senha_hash, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad]
     );
@@ -131,6 +131,74 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     console.error('[POST /auth/login]', err);
     res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// GET /auth/empresa/perfil
+router.get('/empresa/perfil', async (req, res) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token ausente' });
+  try {
+    const { id, tipo } = jwt.verify(header.slice(7), JWT_SECRET);
+    if (tipo !== 'empresa') return res.status(403).json({ error: 'Acceso denegado' });
+    const { rows } = await pool.query(
+      'SELECT id, nombre, ruc, contacto, email, telefono, direccion, plan, tipo_cuenta FROM empresas WHERE id=$1',
+      [id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
+    res.json(rows[0]);
+  } catch {
+    res.status(401).json({ error: 'Token inválido' });
+  }
+});
+
+// PATCH /auth/empresa/senha — alterar senha da empresa
+router.patch('/empresa/senha', async (req, res) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token ausente' });
+  const { senha_actual, senha_nueva } = req.body;
+  if (!senha_actual || !senha_nueva) {
+    return res.status(400).json({ error: 'senha_actual y senha_nueva son obligatorias' });
+  }
+  if (senha_nueva.length < 6) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener mínimo 6 caracteres' });
+  }
+  try {
+    const { id, tipo } = jwt.verify(header.slice(7), JWT_SECRET);
+    if (tipo !== 'empresa') return res.status(403).json({ error: 'Acceso denegado' });
+    const { rows } = await pool.query('SELECT senha_hash FROM empresas WHERE id=$1', [id]);
+    if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
+    const ok = await bcrypt.compare(senha_actual, rows[0].senha_hash);
+    if (!ok) return res.status(401).json({ error: 'Contraseña actual incorrecta' });
+    const hash = await bcrypt.hash(senha_nueva, 10);
+    await pool.query('UPDATE empresas SET senha_hash=$1 WHERE id=$2', [hash, id]);
+    res.json({ ok: true });
+  } catch { res.status(401).json({ error: 'Token inválido' }); }
+});
+
+// PATCH /auth/empresa/perfil
+router.patch('/empresa/perfil', async (req, res) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token ausente' });
+  try {
+    const { id, tipo } = jwt.verify(header.slice(7), JWT_SECRET);
+    if (tipo !== 'empresa') return res.status(403).json({ error: 'Acceso denegado' });
+    const { nombre, ruc, contacto, telefono, direccion } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE empresas SET
+        nombre    = COALESCE($1, nombre),
+        ruc       = COALESCE($2, ruc),
+        contacto  = COALESCE($3, contacto),
+        telefono  = COALESCE($4, telefono),
+        direccion = COALESCE($5, direccion)
+       WHERE id=$6
+       RETURNING id, nombre, ruc, contacto, email, telefono, direccion, plan, tipo_cuenta`,
+      [nombre || null, ruc || null, contacto || null, telefono || null, direccion || null, id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'No encontrado' });
+    res.json(rows[0]);
+  } catch {
+    res.status(401).json({ error: 'Token inválido' });
   }
 });
 

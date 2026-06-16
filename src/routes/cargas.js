@@ -213,7 +213,9 @@ router.get('/:id/solicitudes', auth, requireEmpresa, async (req, res) => {
               ch.placa AS chofer_placa,
               ch.tipo_camion AS chofer_tipo_camion,
               ch.score AS chofer_score,
-              ch.viajes AS chofer_viajes
+              ch.viajes AS chofer_viajes,
+              ch.foto_perfil AS chofer_foto_perfil,
+              ch.foto_camion AS chofer_foto_camion
        FROM solicitudes s
        JOIN choferes ch ON ch.id = s.chofer_id
        WHERE s.carga_id = $1
@@ -307,6 +309,47 @@ router.post('/:id/solicitudes/:sol_id/rechazar', auth, requireEmpresa, async (re
   } catch (err) {
     console.error('[POST /cargas/:id/solicitudes/:sol_id/rechazar]', err);
     res.status(500).json({ error: 'Error al rechazar solicitud' });
+  }
+});
+
+// POST /cargas/:id/rating — empresa avalia chofer, recalcula score médio
+router.post('/:id/rating', auth, requireEmpresa, async (req, res) => {
+  const { rating, obs = '' } = req.body;
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'rating deve ser entre 1 e 5' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cargaRes = await client.query(
+      `UPDATE cargas SET rating_chofer=$1,
+        rating_obs=COALESCE(NULLIF(rating_obs,''), '')||CASE WHEN rating_obs IS NOT NULL AND rating_obs!='' THEN ' | ' ELSE '' END||$2
+       WHERE id=$3 AND empresa_id=$4 AND status='concluido'
+       RETURNING chofer_solicitante_id, rating_chofer`,
+      [rating, obs, req.params.id, req.user.id]
+    );
+    if (!cargaRes.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Carga no encontrada o no concluida' });
+    }
+    const chofer_id = cargaRes.rows[0].chofer_solicitante_id;
+    if (chofer_id) {
+      await client.query(
+        `UPDATE choferes SET score = (
+           SELECT ROUND(AVG(rating_chofer)::numeric, 2)
+           FROM cargas WHERE chofer_solicitante_id=$1 AND rating_chofer IS NOT NULL
+         ) WHERE id=$1`,
+        [chofer_id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, rating });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[POST /cargas/:id/rating]', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

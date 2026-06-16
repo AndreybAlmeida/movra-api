@@ -12,7 +12,9 @@ router.get('/perfil', auth, requireChofer, async (req, res) => {
       `SELECT id, nombre, email, telefono, ci, placa,
               tipo_camion, tipo_carroceria, capacidad,
               lat, lng, location_updated_at,
-              status, creditos, score, viajes, docs, created_at
+              status, creditos, score, viajes, docs,
+              foto_perfil, foto_camion,
+              created_at
        FROM choferes WHERE id=$1`,
       [req.user.id]
     );
@@ -29,6 +31,7 @@ router.patch('/perfil', auth, requireChofer, async (req, res) => {
   const {
     nombre, telefono, ci, placa,
     tipo_camion, tipo_carroceria, capacidad,
+    foto_perfil, foto_camion,
   } = req.body;
   try {
     const { rows } = await pool.query(
@@ -39,10 +42,12 @@ router.patch('/perfil', auth, requireChofer, async (req, res) => {
         placa    = COALESCE($4, placa),
         tipo_camion     = COALESCE($5, tipo_camion),
         tipo_carroceria = COALESCE($6, tipo_carroceria),
-        capacidad       = COALESCE($7, capacidad)
-       WHERE id=$8
-       RETURNING id, nombre, email, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad, status, creditos`,
-      [nombre, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad, req.user.id]
+        capacidad       = COALESCE($7, capacidad),
+        foto_perfil     = COALESCE($8, foto_perfil),
+        foto_camion     = COALESCE($9, foto_camion)
+       WHERE id=$10
+       RETURNING id, nombre, email, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad, status, creditos, foto_perfil, foto_camion`,
+      [nombre, telefono, ci, placa, tipo_camion, tipo_carroceria, capacidad, foto_perfil||null, foto_camion||null, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Chofer no encontrado' });
     res.json(rows[0]);
@@ -135,14 +140,17 @@ router.get('/fletes/aceptados', auth, requireChofer, async (req, res) => {
   }
 });
 
-// GET /chofer/fletes/en_curso
+// GET /chofer/fletes/en_curso — inclui concluido sem avaliação para mostrar botão de rating
 router.get('/fletes/en_curso', auth, requireChofer, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT c.*
        FROM cargas c
        WHERE c.chofer_solicitante_id=$1
-         AND c.status IN ('retiro_agendado', 'en_transito')
+         AND (
+           c.status IN ('retiro_agendado', 'en_transito')
+           OR (c.status = 'concluido' AND c.rating_empresa IS NULL)
+         )
        ORDER BY c.created_at DESC`,
       [req.user.id]
     );
@@ -160,7 +168,8 @@ router.get('/historial', auth, requireChofer, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT c.id, c.origen, c.destino, c.valor_carga, c.moneda,
               c.fecha_retiro, c.fecha_entrega, c.status,
-              c.tipo_camion, c.tipo_carroceria, c.empresa_nombre
+              c.tipo_camion, c.tipo_carroceria, c.empresa_nombre,
+              c.rating_empresa, c.rating_chofer
        FROM cargas c
        WHERE c.chofer_solicitante_id=$1
          AND c.status IN ('concluido', 'cancelado', 'rechazado')
@@ -172,6 +181,64 @@ router.get('/historial', auth, requireChofer, async (req, res) => {
   } catch (err) {
     console.error('[GET /chofer/historial]', err);
     res.status(500).json({ error: 'Error al buscar historial' });
+  }
+});
+
+// PATCH /chofer/senha — alterar senha
+router.patch('/senha', auth, requireChofer, async (req, res) => {
+  const { senha_actual, senha_nueva } = req.body;
+  if (!senha_actual || !senha_nueva) {
+    return res.status(400).json({ error: 'senha_actual y senha_nueva son obligatorias' });
+  }
+  if (senha_nueva.length < 6) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener mínimo 6 caracteres' });
+  }
+  const bcrypt = require('bcryptjs');
+  try {
+    const { rows } = await pool.query('SELECT senha_hash FROM choferes WHERE id=$1', [req.user.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Chofer no encontrado' });
+    const ok = await bcrypt.compare(senha_actual, rows[0].senha_hash);
+    if (!ok) return res.status(401).json({ error: 'Contraseña actual incorrecta' });
+    const hash = await bcrypt.hash(senha_nueva, 10);
+    await pool.query('UPDATE choferes SET senha_hash=$1 WHERE id=$2', [hash, req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[PATCH /chofer/senha]', err);
+    res.status(500).json({ error: 'Error al cambiar contraseña' });
+  }
+});
+
+// PATCH /chofer/foto — atualizar foto de perfil (base64)
+router.patch('/foto', auth, requireChofer, async (req, res) => {
+  const { foto_perfil } = req.body;
+  if (!foto_perfil) return res.status(400).json({ error: 'foto_perfil obligatoria' });
+  try {
+    const { rows } = await pool.query(
+      'UPDATE choferes SET foto_perfil=$1 WHERE id=$2 RETURNING id, foto_perfil',
+      [foto_perfil, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Chofer no encontrado' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[PATCH /chofer/foto]', err);
+    res.status(500).json({ error: 'Error al guardar foto' });
+  }
+});
+
+// PATCH /chofer/foto-camion — atualizar foto do caminhão (base64)
+router.patch('/foto-camion', auth, requireChofer, async (req, res) => {
+  const { foto_camion } = req.body;
+  if (!foto_camion) return res.status(400).json({ error: 'foto_camion obligatoria' });
+  try {
+    const { rows } = await pool.query(
+      'UPDATE choferes SET foto_camion=$1 WHERE id=$2 RETURNING id, foto_camion',
+      [foto_camion, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Chofer no encontrado' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[PATCH /chofer/foto-camion]', err);
+    res.status(500).json({ error: 'Error al guardar foto' });
   }
 });
 

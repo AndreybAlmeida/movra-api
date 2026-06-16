@@ -355,4 +355,74 @@ router.post('/cargas/:id/solicitar', auth, requireChofer, async (req, res) => {
   }
 });
 
+// PATCH /public/cargas/:id/status — chofer avança status do ciclo de vida
+router.patch('/cargas/:id/status', auth, requireChofer, async (req, res) => {
+  const { status } = req.body;
+  const TRANSICIONES = {
+    aceptado:        'retiro_agendado',
+    retiro_agendado: 'en_transito',
+    en_transito:     'concluido',
+  };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cargaRes = await client.query(
+      'SELECT status FROM cargas WHERE id=$1 AND chofer_solicitante_id=$2 FOR UPDATE',
+      [req.params.id, req.user.id]
+    );
+    if (!cargaRes.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Carga no encontrada' });
+    }
+    const nextStatus = TRANSICIONES[cargaRes.rows[0].status];
+    if (!nextStatus || nextStatus !== status) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Transición inválida: ${cargaRes.rows[0].status} → ${status}`,
+      });
+    }
+    const updated = await client.query(
+      'UPDATE cargas SET status=$1 WHERE id=$2 RETURNING *',
+      [nextStatus, req.params.id]
+    );
+    if (nextStatus === 'concluido') {
+      await client.query(
+        `UPDATE choferes SET viajes=viajes+1, status='disponible' WHERE id=$1`,
+        [req.user.id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json(updated.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[PATCH /public/cargas/:id/status]', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /public/cargas/:id/rating — chofer avalia empresa
+router.post('/cargas/:id/rating', auth, requireChofer, async (req, res) => {
+  const { rating, obs = '' } = req.body;
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'rating deve ser entre 1 e 5' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE cargas SET rating_empresa=$1, rating_obs=$2
+       WHERE id=$3 AND chofer_solicitante_id=$4 AND status='concluido'
+       RETURNING id, rating_empresa`,
+      [rating, obs, req.params.id, req.user.id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Carga no encontrada o no concluida' });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('[POST /public/cargas/:id/rating]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

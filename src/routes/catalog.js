@@ -88,8 +88,8 @@ router.post('/', auth, async (req, res) => {
 
     const { rows } = await pool.query(
       `INSERT INTO catalog_options
-         (category, name, normalized_name, status, scope, created_by_user_id, created_by_account_id)
-       VALUES ($1, $2, $3, 'pending_review', 'account', $4, $4)
+         (category, name, normalized_name, status, scope, created_by_account_id)
+       VALUES ($1, $2, $3, 'pending_review', 'account', $4)
        RETURNING *`,
       [category, clean, norm, req.user.id]
     );
