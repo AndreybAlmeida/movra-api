@@ -30,6 +30,9 @@ app.use(cors({
 app.use(express.json());
 
 /* ── Health check ─────────────────────────────── */
+app.get('/', (_req, res) =>
+  res.json({ api: 'MOVRA', version: '2.0.0', status: 'ok', ts: new Date().toISOString() })
+);
 app.get('/health', (_req, res) =>
   res.json({ ok: true, ts: new Date().toISOString(), version: '2.0.0' })
 );
