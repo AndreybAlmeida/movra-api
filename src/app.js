@@ -74,7 +74,4 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || 'Error interno' });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`MOVRA API v2.0 rodando na porta ${PORT}`));
-
 module.exports = app;
