@@ -231,16 +231,17 @@ router.post('/cargas/:id/desbloquear', auth, requireChofer, async (req, res) => 
   }
 });
 
-// POST /public/cargas/:id/aceptar — aceitar diretamente (requer desbloqueio prévio, atômico)
+// POST /public/cargas/:id/aceptar — expresar interés (crea solicitud + pendiente_aprobacion)
+// El Transportista debe aprobar antes de que la operación comience.
 router.post('/cargas/:id/aceptar', auth, requireChofer, async (req, res) => {
+  const { notas = '' } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Lock atômico — evita duplo aceite
+    // Lock atômico para evitar race conditions
     const cargaRes = await client.query(
-      `SELECT id, status, empresa_id, origen, destino, valor_carga, fecha_retiro, fecha_entrega
-       FROM cargas WHERE id=$1 FOR UPDATE`,
+      `SELECT id, status FROM cargas WHERE id=$1 FOR UPDATE`,
       [req.params.id]
     );
     if (!cargaRes.rows[0]) {
@@ -248,9 +249,9 @@ router.post('/cargas/:id/aceptar', auth, requireChofer, async (req, res) => {
       return res.status(404).json({ error: 'Carga no encontrada' });
     }
     const carga = cargaRes.rows[0];
-    if (!['disponible', 'publicado', 'desbloqueado'].includes(carga.status)) {
+    if (!['disponible', 'publicado', 'desbloqueado', 'pendiente_aprobacion'].includes(carga.status)) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Esta carga ya fue aceptada por otro chofer.' });
+      return res.status(409).json({ error: 'Esta carga ya no está disponible.' });
     }
 
     // Verificar que o chofer desbloqueou
@@ -260,46 +261,36 @@ router.post('/cargas/:id/aceptar', auth, requireChofer, async (req, res) => {
     );
     if (!debRes.rows[0]) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Debes desbloquear la carga antes de aceptar.' });
+      return res.status(403).json({ error: 'Debes desbloquear la carga antes de solicitarla.' });
     }
 
-    // Dados do chofer para registrar no aceite
-    const choferRes = await client.query(
-      `SELECT nombre, telefono, ci, placa, tipo_camion, tipo_carroceria
-       FROM choferes WHERE id=$1`,
-      [req.user.id]
-    );
-    const chofer = choferRes.rows[0] || {};
-
-    // Aceitar a carga atomicamente
-    const { rows } = await client.query(
-      `UPDATE cargas SET
-         status            = 'aceptado',
-         chofer_solicitante_id = $1,
-         chofer_aceptado_at    = NOW()
-       WHERE id=$2
+    // Criar solicitud (upsert para evitar duplicados do mesmo chofer)
+    const { rows: solRows } = await client.query(
+      `INSERT INTO solicitudes (carga_id, chofer_id, notas)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (carga_id, chofer_id) DO UPDATE SET notas=$3, created_at=NOW()
        RETURNING *`,
-      [req.user.id, req.params.id]
+      [req.params.id, req.user.id, notas]
     );
 
-    // Rejeitar outras solicitudes pendentes da mesma carga (se houver)
+    // Carga entra em pendiente_aprobacion (aguardando aprovação do Transportista)
     await client.query(
-      `UPDATE solicitudes SET status='rechazado', respondido_at=NOW()
-       WHERE carga_id=$1 AND status='pendiente'`,
+      `UPDATE cargas SET status='pendiente_aprobacion'
+       WHERE id=$1 AND status IN ('disponible', 'publicado', 'desbloqueado', 'pendiente_aprobacion')`,
       [req.params.id]
     );
 
     await client.query('COMMIT');
 
-    res.json({
-      carga:   rows[0],
-      chofer,
-      mensaje: '¡Carga aceptada con éxito! Recordá cumplir con la fecha y hora de retiro.',
+    res.status(201).json({
+      solicitud: solRows[0],
+      status: 'pendiente_aprobacion',
+      mensaje: 'Solicitud enviada. El transportista revisará tu perfil y te confirmará.',
     });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[POST /public/cargas/:id/aceptar]', err);
-    res.status(500).json({ error: 'Error al aceptar la carga' });
+    res.status(500).json({ error: 'Error al solicitar la carga' });
   } finally {
     client.release();
   }
@@ -358,6 +349,7 @@ router.post('/cargas/:id/solicitar', auth, requireChofer, async (req, res) => {
 // PATCH /public/cargas/:id/status — chofer avança status do ciclo de vida
 router.patch('/cargas/:id/status', auth, requireChofer, async (req, res) => {
   const { status } = req.body;
+  // pendiente_aprobacion não avança pelo chofer — só pelo transportista via /aprobar
   const TRANSICIONES = {
     aceptado:        'retiro_agendado',
     retiro_agendado: 'en_transito',
